@@ -316,6 +316,8 @@ The constraints from step 3 above persist across `DETACH DELETE` and never need 
 ## Additional Resources
 
 For more detailed information about FreeIPA security analysis and attack techniques, please refer to our blog posts:
+1. https://swarm.ptsecurity.com/thinking-in-graphs-with-ipahound/
+2. https://habr.com/ru/companies/pt/articles/1028412/
 
 - ...
 
