@@ -1,6 +1,7 @@
 import json
 import logging
 import datetime
+from codecs import ignore_errors
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
 
@@ -128,17 +129,19 @@ class ObjectProcessor:
 class PostProcessing:
 
     def __init__(
-        self,
-        input_raw_file: Optional[str],
-        output_file: Optional[str],
-        apoc_output_file: Optional[str],
-        logger: logging.Logger,
-        json_data: Optional[List] = None,
-        save_all_hbac = False
+            self,
+            input_raw_file: Optional[str],
+            output_file: Optional[str],
+            apoc_output_file: Optional[str],
+            logger: logging.Logger,
+            json_data: Optional[List] = None,
+            add_hbac_node=False,
+            save_all_hbac = False
     ):
         self.logger = logger
         self.input_raw_file = input_raw_file
         self.json_data = json_data
+        self.add_hbac_node = add_hbac_node
         self.save_all_hbac = save_all_hbac
 
         if apoc_output_file:
@@ -175,10 +178,10 @@ class PostProcessing:
                     self.objects[item["meta"]["type"]] = item["data"]
 
     def _generate_node_json(
-        self,
-        node_id: int,
-        label: str,
-        properties: Optional[Dict] = None
+            self,
+            node_id: int,
+            label: str,
+            properties: Optional[Dict] = None
     ) -> Dict:
         return {
             "type": "node",
@@ -188,12 +191,12 @@ class PostProcessing:
         }
 
     def _generate_relationship_json(
-        self,
-        rel_id: int,
-        label: str,
-        start_node: Dict,
-        end_node: Dict,
-        properties: Optional[Dict] = None
+            self,
+            rel_id: int,
+            label: str,
+            start_node: Dict,
+            end_node: Dict,
+            properties: Optional[Dict] = None
     ) -> Dict:
         return {
             "id": rel_id,
@@ -249,12 +252,17 @@ class PostProcessing:
                 entry["NetGroup"] = True
                 entry["name"] = "Net Group: " + entry["name"]
 
+            if "ipahbacrule" in entry.get("objectClass", []):
+                entry["NetGroup"] = True
+                entry["name"] = "HBAC: " + entry["name"]
+
     def _search_object(
-        self,
-        dn: str,
-        substr: bool = False
+            self,
+            dn: str,
+            substr: bool = False,
+            ignore_exception: bool = False
     ) -> Tuple[Optional[str], Optional[Dict]]:
-        if any(skip in dn for skip in [",cn=hbac", ",cn=sudorules", ",cn=sudocmds,"]):
+        if not ignore_exception and any(skip in dn for skip in [",cn=hbac", ",cn=sudorules", ",cn=sudocmds,"]):
             return None, None
 
         for obj_type in self.objects:
@@ -343,11 +351,11 @@ class PostProcessing:
             self._create_member_relationship(entry, end_object, obj_type, attr_name)
 
     def _create_member_relationship(
-        self,
-        entry: Dict,
-        end_object: Dict,
-        end_type: str,
-        attr_name: str
+            self,
+            entry: Dict,
+            end_object: Dict,
+            end_type: str,
+            attr_name: str
     ) -> None:
         attr_lower = attr_name.lower()
 
@@ -355,43 +363,43 @@ class PostProcessing:
             if self._check_duplicate_relationship(entry["dn"], end_object["dn"]):
                 return
             rel_type = "MemberOf"
-            start = {"id": entry["id"], "labels": [entry["type"]], "properties": {}}
-            end = {"id": end_object["id"], "labels": [end_type], "properties": {}}
+            start = {"id": entry["id"], "labels": [entry["type"]], "properties": {"objectid": entry["objectid"]}}
+            end = {"id": end_object["id"], "labels": [end_type], "properties": {"objectid": end_object["objectid"]}}
             properties = {"isacl": False}
 
         elif attr_lower in ["member", "memberuser", "memberhost"]:
             if self._check_duplicate_relationship(end_object["dn"], entry["dn"]):
                 return
             rel_type = "MemberOf"
-            start = {"id": end_object["id"], "labels": [end_type], "properties": {}}
-            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {}}
+            start = {"id": end_object["id"], "labels": [end_type], "properties": {"objectid": end_object["objectid"]}}
+            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {"objectid": entry["objectid"]}}
             properties = {"isacl": False}
 
         elif attr_lower == "ipaexternalmember":
             rel_type = "MemberOf"
-            start = {"id": end_object["id"], "labels": [end_type], "properties": {}}
-            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {}}
+            start = {"id": end_object["id"], "labels": [end_type], "properties": {"objectid": end_object["objectid"]}}
+            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {"objectid": entry["objectid"]}}
             properties = {"isacl": False}
 
         elif attr_lower == "membermanager":
             rel_type = "AddMember"
-            start = {"id": end_object["id"], "labels": [end_type], "properties": {}}
-            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {}}
+            start = {"id": end_object["id"], "labels": [end_type], "properties": {"objectid": end_object["objectid"]}}
+            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {"objectid": entry["objectid"]}}
             properties = {"isacl": True}
 
         elif attr_lower in ["owns", "managedby"] and end_object["id"] != entry["id"]:
             rel_type = "Owns"
-            start = {"id": end_object["id"], "labels": [end_type], "properties": {}}
-            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {}}
+            start = {"id": end_object["id"], "labels": [end_type], "properties": {"objectid": end_object["objectid"]}}
+            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {"objectid": entry["objectid"]}}
             properties = {
                 "isacl": True,
                 "description": "End has managedBy attribute with start principal. "
-                              "You can get keytab for end if you obtain start."
+                               "You can get keytab for end if you obtain start."
             }
 
         elif "ipaallowedtoperform" in attr_lower and end_object["id"] != entry["id"]:
-            start = {"id": end_object["id"], "labels": [end_type], "properties": {}}
-            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {}}
+            start = {"id": end_object["id"], "labels": [end_type], "properties": {"objectid": end_object["objectid"]}}
+            end = {"id": entry["id"], "labels": [entry["type"]], "properties": {"objectid": entry["objectid"]}}
 
             if attr_lower == "ipaallowedtoperform;write_keys":
                 rel_type = "ForceChangePassword"
@@ -426,7 +434,76 @@ class PostProcessing:
         self.relationships[key] = True
         return False
 
-    def _process_hbac_rules(self) -> None:
+    def _process_hbac_rules_mini(self) -> None:
+        if "hbac_rule" not in self.objects:
+            return
+
+        for rule in self.objects["hbac_rule"].values():
+            if not is_enabled(rule):
+                continue
+
+            self._save_object_entry(rule, "IPAGroup")
+
+            users = self._get_rule_targets(rule, "user")
+            if users == ["*"]:
+                users = self.objects["IPAUser"].keys()
+            hosts = self._get_rule_targets(rule, "host")
+            if hosts == ["*"]:
+                hosts = self.objects["IPAComputer"].keys()
+            services = self._get_rule_targets(rule, "service")
+
+            for user in users:
+                for service in services:
+                    if self._is_ssh_service(service):
+                        self._create_mini_hbac_relationship(user, rule["dn"], memberof=True)
+                    if self._is_sudo_service(service):
+                        self._mark_sudo_access(user, rule["dn"])
+                    if self.save_all_hbac:
+                        self._create_mini_hbac_relationship(user, rule["dn"], service, memberof=True)
+
+            for host in hosts:
+                for service in services:
+                    if self._is_ssh_service(service):
+                        self._create_mini_hbac_relationship(rule["dn"], host)
+                    if self._is_sudo_service(service):
+                        self._mark_sudo_access(rule["dn"], host)
+                    if self.save_all_hbac:
+                        self._create_mini_hbac_relationship(rule["dn"], host, service)
+
+    def _create_mini_hbac_relationship(self, user_dn: str, host_dn: str, service: str = "SSH", memberof=False) -> None:
+        if service == "*":
+            service = "ALL"
+        elif service[:3] == "cn=":
+            service = service[3:service.find(",")]
+
+        if memberof:
+            label = "MemberOf"
+            properties = {}
+        else:
+            label = f"Can{service}"
+            properties = {"type": "CanSSH"}
+
+
+        relationship = {
+            "id": self.relationship_id,
+            "type": "relationship",
+            "label": label,
+            "properties": properties,
+            "start": "",
+            "end": ""
+        }
+
+        _, user_object = self._search_object(user_dn, ignore_exception=True)
+        _, host_object = self._search_object(host_dn, ignore_exception=True)
+
+        self._add_rule_relationship(
+            {"type": "IPAUser", "name": user_dn, "properties": {"objectid": user_object["objectid"]}},
+            {"type": "IPAComputer", "name": host_dn, "properties": {"objectid": host_object["objectid"]}},
+            relationship,
+            ignore_exception=True
+        )
+
+    def _process_full_hbac_rules(self) -> None:
         if "hbac_rule" not in self.objects:
             return
 
@@ -435,7 +512,11 @@ class PostProcessing:
                 continue
 
             users = self._get_rule_targets(rule, "user")
+            if users == ["*"]:
+                users = self.objects["IPAUser"].keys()
             hosts = self._get_rule_targets(rule, "host")
+            if hosts == ["*"]:
+                hosts = self.objects["IPAComputer"].keys()
             services = self._get_rule_targets(rule, "service")
 
             for user in users:
@@ -477,9 +558,12 @@ class PostProcessing:
             "end": ""
         }
 
+        _, user_object = self._search_object(user_dn)
+        _, host_object = self._search_object(host_dn)
+
         self._add_rule_relationship(
-            {"type": "IPAUser", "name": user_dn},
-            {"type": "IPAComputer", "name": host_dn},
+            {"type": "IPAUser", "name": user_dn, "properties": {"objectid": user_object["objectid"]}},
+            {"type": "IPAComputer", "name": host_dn, "properties": {"objectid": host_object["objectid"]}},
             relationship
         )
 
@@ -538,9 +622,12 @@ class PostProcessing:
                     if "ipaUniqueID" in rule:
                         relationship["properties"]["objectid"] = rule["ipaUniqueID"]
 
+                    _, user_object = self._search_object(user)
+                    _, host_object = self._search_object(host)
+
                     self._add_rule_relationship(
-                        {"type": "IPAUser", "name": user},
-                        {"type": "IPAComputer", "name": host},
+                        {"type": "IPAUser", "name": user, "properties": {"objectid": user_object["objectid"]}},
+                        {"type": "IPAComputer", "name": host, "properties": {"objectid": host_object["objectid"]}},
                         relationship,
                         check_sudo_access=True
                     )
@@ -568,23 +655,24 @@ class PostProcessing:
                         self.sudo_hbac_access[f'{start_group}+{group}'] = True
 
     def _add_rule_relationship(
-        self,
-        start_spec: Dict,
-        end_spec: Dict,
-        relationship: Dict,
-        add_to_sudo_access: bool = False,
-        check_sudo_access: bool = False,
-        save_relationship: bool = True
+            self,
+            start_spec: Dict,
+            end_spec: Dict,
+            relationship: Dict,
+            add_to_sudo_access: bool = False,
+            check_sudo_access: bool = False,
+            save_relationship: bool = True,
+            ignore_exception: bool = False
     ) -> None:
-        start_objects = self._get_objects_for_spec(start_spec)
-        end_objects = self._get_objects_for_spec(end_spec)
+        start_objects = self._get_objects_for_spec(start_spec, ignore_exception=ignore_exception)
+        end_objects = self._get_objects_for_spec(end_spec, ignore_exception=ignore_exception)
 
         if not start_objects or not end_objects:
             return
 
         for start_obj in start_objects:
             relationship["start"] = self._generate_node_json(
-                start_obj["id"], start_obj["type"]
+                start_obj["id"], start_obj["type"], properties=start_spec.get("properties", {})
             )
 
             for end_obj in end_objects:
@@ -601,7 +689,7 @@ class PostProcessing:
                     continue
 
                 relationship["end"] = self._generate_node_json(
-                    end_obj["id"], end_obj["type"]
+                    end_obj["id"], end_obj["type"], properties=end_spec.get("properties", {})
                 )
                 relationship["id"] = self.relationship_id
 
@@ -610,7 +698,7 @@ class PostProcessing:
                 )
                 self.relationship_id += 1
 
-    def _get_objects_for_spec(self, spec: Dict) -> List[Dict]:
+    def _get_objects_for_spec(self, spec: Dict, ignore_exception=False) -> List[Dict]:
         if spec["name"] == '*':
             objects = []
             for obj in self.objects.get(spec["type"], {}).values():
@@ -622,7 +710,7 @@ class PostProcessing:
                 objects.append(obj)
             return objects
 
-        _, obj = self._search_object(spec["name"])
+        _, obj = self._search_object(spec["name"], ignore_exception=ignore_exception)
         if obj:
             if spec["type"] == "IPAUser" and is_account_locked(obj):
                 return []
@@ -694,7 +782,10 @@ class PostProcessing:
 
     def _process_rules(self, status) -> None:
         status.update("Processing HBAC rules...")
-        self._process_hbac_rules()
+        if self.add_hbac_node:
+            self._process_hbac_rules_mini()
+        else:
+            self._process_full_hbac_rules()
 
         status.update("Processing SUDO rules...")
         self._process_sudo_rules()
@@ -726,8 +817,14 @@ class PostProcessing:
                 continue
 
             users = self._get_rule_targets(rule, "user")
+            if users == ["*"]:
+                users = self.objects["IPAUser"].keys()
             hosts = self._get_rule_targets(rule, "host")
+            if hosts == ["*"]:
+                hosts = self.objects["IPAComputer"].keys()
             services = self._get_rule_targets(rule, "service")
+            if services == ["*"]:
+                services = self.objects["IPAService"].keys()
             profiles = rule.get("ipaMemberCertProfile", [])
 
             for profile in profiles:
@@ -741,10 +838,10 @@ class PostProcessing:
                     self._create_enrollment_relationship("IPAService", service, profile)
 
     def _create_enrollment_relationship(
-        self,
-        source_type: str,
-        source_name: str,
-        profile_dn: str
+            self,
+            source_type: str,
+            source_name: str,
+            profile_dn: str
     ) -> None:
         relationship = {
             "id": self.relationship_id,
@@ -755,9 +852,12 @@ class PostProcessing:
             "end": ""
         }
 
+        _, source_obj = self._search_object(source_name)
+        _, profile_obj = self._search_object(profile_dn)
+
         self._add_rule_relationship(
-            {"type": source_type, "name": source_name},
-            {"type": "IPACertificateTemplate", "name": profile_dn},
+            {"type": source_type, "name": source_name, "properties": {"objectid": source_obj["objectid"]}},
+            {"type": "IPACertificateTemplate", "name": profile_dn, "properties": {"objectid": profile_obj["objectid"]}},
             relationship
         )
 
@@ -796,8 +896,8 @@ class PostProcessing:
                     relationship = self._generate_relationship_json(
                         self.relationship_id,
                         "AllowedToDelegate",
-                        {"id": source["id"], "labels": [source["type"]], "properties": {}},
-                        {"id": target["id"], "labels": [target["type"]], "properties": {}},
+                        {"id": source["id"], "labels": [source["type"]], "properties": {"objectid": target["objectid"]}},
+                        {"id": target["id"], "labels": [target["type"]], "properties": {"objectid": target["objectid"]}},
                         {"isacl": True}
                     )
                     self.file_descriptor.write(json.dumps(relationship, cls=ExtendedEncoder) + self.line_ending)
@@ -863,8 +963,8 @@ class PostProcessing:
             relationship = self._generate_relationship_json(
                 self.relationship_id,
                 rel_type,
-                {"id": perm["id"], "labels": ["Base"], "properties": {}},
-                self._generate_node_json(domain_obj["id"], "Base"),
+                {"id": perm["id"], "labels": ["Base"], "properties": {"objectid": perm["objectid"]}},
+                self._generate_node_json(domain_obj["id"], "Base", properties={"objectid": domain_obj["objectid"]}),
                 {"isacl": True}
             )
 
@@ -894,8 +994,8 @@ class PostProcessing:
                 relationship = self._generate_relationship_json(
                     self.relationship_id,
                     "AllowedToDelegate",
-                    {"id": source["id"], "labels": ["Base"], "properties": {}},
-                    {"id": target["id"], "labels": ["Base"], "properties": {}},
+                    {"id": source["id"], "labels": ["Base"], "properties": {"objectid": source["objectid"]}},
+                    {"id": target["id"], "labels": ["Base"], "properties": {"objectid": target["objectid"]}},
                     {"isacl": True}
                 )
                 self.file_descriptor.write(json.dumps(relationship, cls=ExtendedEncoder) + self.line_ending)

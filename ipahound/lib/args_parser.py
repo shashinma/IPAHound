@@ -52,6 +52,11 @@ def get_parser(dump_types: Optional[List[str]] = None) -> argparse.ArgumentParse
         help='Will draw all HBAC services in a graph (by default sudo and SSH)'
     )
     output_group.add_argument(
+        '--add-hbac-node',
+        action='store_true',
+        help='Will add HBAC node. For optimization graph file size. (For big domain)'
+    )
+    output_group.add_argument(
         '-a', '--apoc-output',
         metavar='FILE',
         help='Output JSON for APOC neo4j plugin (recommended)'
