@@ -134,11 +134,13 @@ class PostProcessing:
         apoc_output_file: Optional[str],
         logger: logging.Logger,
         json_data: Optional[List] = None,
+        add_hbac_node=False,
         save_all_hbac = False
     ):
         self.logger = logger
         self.input_raw_file = input_raw_file
         self.json_data = json_data
+        self.add_hbac_node = add_hbac_node
         self.save_all_hbac = save_all_hbac
 
         if apoc_output_file:
@@ -248,6 +250,10 @@ class PostProcessing:
             if "ipanisnetgroup" in entry.get("objectClass", []):
                 entry["NetGroup"] = True
                 entry["name"] = "Net Group: " + entry["name"]
+
+            if "ipahbacrule" in entry.get("objectClass", []):
+                entry["NetGroup"] = True
+                entry["name"] = "HBAC: " + entry["name"]
 
     def _search_object(
         self,
@@ -426,7 +432,59 @@ class PostProcessing:
         self.relationships[key] = True
         return False
 
-    def _process_hbac_rules(self) -> None:
+    def _process_hbac_rules_mini(self) -> None:
+        if "hbac_rule" not in self.objects:
+            return
+
+        for rule in self.objects["hbac_rule"].values():
+            if not is_enabled(rule):
+                continue
+
+            self._save_object_entry(rule, "IPAGroup")
+
+            users = self._get_rule_targets(rule, "user")
+            hosts = self._get_rule_targets(rule, "host")
+            services = self._get_rule_targets(rule, "service")
+
+            for user in users:
+                for service in services:
+                    if self._is_ssh_service(service):
+                        self._create_mini_hbac_relationship(user, rule["dn"])
+                    if self._is_sudo_service(service):
+                        self._mark_sudo_access(user, rule["dn"])
+                    if self.save_all_hbac:
+                        self._create_mini_hbac_relationship(user, rule["dn"], service)
+
+            for host in hosts:
+                for service in services:
+                    if self._is_ssh_service(service):
+                        self._create_mini_hbac_relationship(rule["dn"], host)
+                    if self._is_sudo_service(service):
+                        self._mark_sudo_access(rule["dn"], host)
+                    if self.save_all_hbac:
+                        self._create_mini_hbac_relationship(rule["dn"], host, service)
+
+    def _create_mini_hbac_relationship(self, user_dn: str, host_dn: str, service: str = "SSH") -> None:
+        if service == "*":
+            service = "ALL"
+        elif service[:3] == "cn=":
+            service = service[3:service.find(",")]
+        relationship = {
+            "id": self.relationship_id,
+            "type": "relationship",
+            "label": f"Can{service}",
+            "properties": {"type": "CanSSH"},
+            "start": "",
+            "end": ""
+        }
+
+        self._add_rule_relationship(
+            {"type": "IPAUser", "name": user_dn},
+            {"type": "IPAComputer", "name": host_dn},
+            relationship
+        )
+
+    def _process_full_hbac_rules(self) -> None:
         if "hbac_rule" not in self.objects:
             return
 
@@ -694,7 +752,10 @@ class PostProcessing:
 
     def _process_rules(self, status) -> None:
         status.update("Processing HBAC rules...")
-        self._process_hbac_rules()
+        if self.add_hbac_node:
+            self._process_hbac_rules_mini()
+        else:
+            self._process_full_hbac_rules()
 
         status.update("Processing SUDO rules...")
         self._process_sudo_rules()

@@ -532,6 +532,7 @@ def main():
             args.output,
             args.apoc_output,
             logging,
+            add_hbac_node=add_hbac_node,
             save_all_hbac=args.save_all_hbac
         )
         return
@@ -565,6 +566,7 @@ def main():
                 args.apoc_output,
                 logging,
                 json_data,
+                add_hbac_node=args.add_hbac_node,
                 save_all_hbac=args.save_all_hbac
             )
 
