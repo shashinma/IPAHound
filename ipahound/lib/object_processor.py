@@ -1,6 +1,7 @@
 import json
 import logging
 import datetime
+from codecs import ignore_errors
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
 
@@ -258,9 +259,10 @@ class PostProcessing:
     def _search_object(
             self,
             dn: str,
-            substr: bool = False
+            substr: bool = False,
+            ignore_exception: bool = False
     ) -> Tuple[Optional[str], Optional[Dict]]:
-        if any(skip in dn for skip in [",cn=hbac", ",cn=sudorules", ",cn=sudocmds,"]):
+        if not ignore_exception and any(skip in dn for skip in [",cn=hbac", ",cn=sudorules", ",cn=sudocmds,"]):
             return None, None
 
         for obj_type in self.objects:
@@ -453,11 +455,11 @@ class PostProcessing:
             for user in users:
                 for service in services:
                     if self._is_ssh_service(service):
-                        self._create_mini_hbac_relationship(user, rule["dn"])
+                        self._create_mini_hbac_relationship(user, rule["dn"], memberof=True)
                     if self._is_sudo_service(service):
                         self._mark_sudo_access(user, rule["dn"])
                     if self.save_all_hbac:
-                        self._create_mini_hbac_relationship(user, rule["dn"], service)
+                        self._create_mini_hbac_relationship(user, rule["dn"], service, memberof=True)
 
             for host in hosts:
                 for service in services:
@@ -491,13 +493,14 @@ class PostProcessing:
             "end": ""
         }
 
-        _, user_object = self._search_object(user_dn)
-        _, host_object = self._search_object(host_dn)
+        _, user_object = self._search_object(user_dn, ignore_exception=True)
+        _, host_object = self._search_object(host_dn, ignore_exception=True)
 
         self._add_rule_relationship(
             {"type": "IPAUser", "name": user_dn, "properties": {"objectid": user_object["objectid"]}},
             {"type": "IPAComputer", "name": host_dn, "properties": {"objectid": host_object["objectid"]}},
-            relationship
+            relationship,
+            ignore_exception=True
         )
 
     def _process_full_hbac_rules(self) -> None:
@@ -658,17 +661,18 @@ class PostProcessing:
             relationship: Dict,
             add_to_sudo_access: bool = False,
             check_sudo_access: bool = False,
-            save_relationship: bool = True
+            save_relationship: bool = True,
+            ignore_exception: bool = False
     ) -> None:
-        start_objects = self._get_objects_for_spec(start_spec)
-        end_objects = self._get_objects_for_spec(end_spec)
+        start_objects = self._get_objects_for_spec(start_spec, ignore_exception=ignore_exception)
+        end_objects = self._get_objects_for_spec(end_spec, ignore_exception=ignore_exception)
 
         if not start_objects or not end_objects:
             return
 
         for start_obj in start_objects:
             relationship["start"] = self._generate_node_json(
-                start_obj["id"], start_obj["type"]
+                start_obj["id"], start_obj["type"], properties=start_spec.get("properties", {})
             )
 
             for end_obj in end_objects:
@@ -685,7 +689,7 @@ class PostProcessing:
                     continue
 
                 relationship["end"] = self._generate_node_json(
-                    end_obj["id"], end_obj["type"]
+                    end_obj["id"], end_obj["type"], properties=end_spec.get("properties", {})
                 )
                 relationship["id"] = self.relationship_id
 
@@ -694,7 +698,7 @@ class PostProcessing:
                 )
                 self.relationship_id += 1
 
-    def _get_objects_for_spec(self, spec: Dict) -> List[Dict]:
+    def _get_objects_for_spec(self, spec: Dict, ignore_exception=False) -> List[Dict]:
         if spec["name"] == '*':
             objects = []
             for obj in self.objects.get(spec["type"], {}).values():
@@ -706,7 +710,7 @@ class PostProcessing:
                 objects.append(obj)
             return objects
 
-        _, obj = self._search_object(spec["name"])
+        _, obj = self._search_object(spec["name"], ignore_exception=ignore_exception)
         if obj:
             if spec["type"] == "IPAUser" and is_account_locked(obj):
                 return []
