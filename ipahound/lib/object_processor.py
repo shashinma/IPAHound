@@ -292,7 +292,7 @@ class PostProcessing:
         return self._create_missing_object(dn)
 
     def _create_missing_object(self, dn: str) -> Tuple[str, Dict]:
-        if not "=" in dn and dn[:5] == "S-1-5":
+        if not "=" in dn or dn[:5] == "S-1-5":
             name = dn
         else:
             name = dn.split('=')[1].split(',')[0].upper()
